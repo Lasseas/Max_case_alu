@@ -28,12 +28,13 @@ instance = args.instance
 year = args.year
 case = args.case
 
-excel_path = "NO1_Pulp_Paper_2024_combined historical data.xlsx"
-#excel_path = "NO1_Aluminium_2024_combined historical data.xlsx"
+#excel_path = "NO1_Pulp_Paper_2024_combined historical data_Uten_SatSun.xlsx"
+#excel_path = "NO1_Pulp_Paper_2024_combined historical data.xlsx"
+excel_path = "NO1_Aluminum_2024_combined historical data.xlsx"
 
 # Define branch structures for each case type
 case_configs = {
-    "wide": (2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    "wide": (2, 30, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
     "deep": (2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0),
     "max":  (2, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 }
@@ -78,9 +79,77 @@ run_everything(
     num_branches_to_fourteenthStage,
     num_branches_to_fifteenthStage
 )
-
 """
 
+def make_tab_file(filename, data_generator, chunk_size=10_000_000):
+        """
+        Writes a large dataset to a .tab file in chunks using tab as a delimiter.
+
+        Parameters:
+            filename (str): Name of the tab-separated file to save (e.g., 'output.tab').
+            data_generator (generator): A generator that yields DataFrame chunks.
+            chunk_size (int): Number of rows to process per chunk.
+        """
+        first_chunk = True  # Used to write the header only once
+
+        with open(filename, "w", newline='') as f:
+            for df_chunk in data_generator:
+                df_chunk.to_csv(f, sep = "\t", index=False, header=first_chunk, lineterminator='\n')
+                first_chunk = False
+
+        print(f"{filename} saved successfully!")
+
+cost_activity = {
+    "Power_Grid": {1: 0, 2: -1.162, 3: 2000, 4: -2000}, # 1 = Import, 2 = Export, 3 = RT_Import, 4 = RT_Export 
+    "ElectricBoiler": {1: 0, 2: 0, 3: 0}, #1 = LT, 2 = MT, 3 = Dummy
+    "HP_LT": {1: 0, 2: 0}, #1 = LT, 2 = Dummy
+    "HP_MT": {1: 0, 2: 0, 3: 0}, #1 = LT, 2 = MT, 3 = Dummy
+    "PV" : {1: 0},
+    "P2G": {1: 0},
+    "G2P": {1: 0},
+    "GasBoiler": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}, #1 = LT (CH4 mix), 2 = MT (CH4 mix), 3 = LT (CH4), 4 = MT (CH4), 5 = LT (Biogas), 6 = MT (Biogas)
+    "GasBoiler_CCS": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}, #1 = LT (CH4 mix), 2 = MT (CH4 mix), 3 = LT (CH4), 4 = MT (CH4), 5 = LT (Biogas), 6 = MT (Biogas)
+    "CHP": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}, #1 = LT (CH4 mix), 2 = MT (CH4 mix), 3 = LT (CH4), 4 = MT (CH4), 5 = LT (Biogas), 6 = MT (Biogas)
+    "CHP_CCS": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}, #1 = LT (CH4 mix), 2 = MT (CH4 mix), 3 = LT (CH4), 4 = MT (CH4), 5 = LT (Biogas), 6 = MT (Biogas)
+    "Biogas_Grid": {1: 64.5, 2: 0}, #1 = Import, 2 = Export
+    "CH4_Grid": {1: 39.479, 2: 0}, #1 = Import, 2 = Export
+    "CH4_H2_Mixer": {1: 0},
+    "DieselReserveGenerator": {1: 148.8},
+    "H2_Grid": {1: 150.1502, 2: 0}, #1 = Import, 2 = Export
+    "Dummy_Grid": {1: 0} #1 = Export
+    }
+
+#####################################################################################
+################################ Ble for stor til pushe til git ######################
+################################## må genereres i solstorm ##########################
+#####################################################################################
+
+def generate_cost_activity(num_nodes, num_timesteps, cost_activity, filename="Par_ActivityCost.tab"):
+        def data_generator(chunk_size=10_000_000):
+            rows = []
+            count = 0
+            for node in range(3, num_nodes + 1):
+                for tech, mode_costs in cost_activity.items():
+                    for mode in mode_costs:
+                        for t in range(1, num_timesteps + 1):
+                            cost = mode_costs[mode]
+                            rows.append({
+                                "Node": node,
+                                "Time": t,
+                                "Technology": tech,
+                                "Operational_mode": mode,
+                                "Cost": cost
+                            })
+                            count += 1
+                            if count % chunk_size == 0:
+                                yield pd.DataFrame(rows)
+                                rows = []
+            if rows:
+                yield pd.DataFrame(rows)
+
+        make_tab_file(filename, data_generator())
+
+generate_cost_activity(num_nodes = 7812, num_timesteps = 24, cost_activity = cost_activity)
 
 #####################################################################################
 ################################## KONSTANTE SETT ###################################
@@ -120,7 +189,7 @@ def read_all_sheets(excel):
         print(f"Saved file: {output_filename}")
 
 # Call the function with your Excel file
-read_all_sheets('Test_data_simple_extended_reduced.xlsx')
+read_all_sheets('Input_data_With_dummyGrid_and_RT.xlsx')
 
 ####################################################################
 ######################### MODEL SPECIFICATIONS #####################
@@ -188,9 +257,10 @@ PARAMETERS
 #Declaring Parameters
 print("Declaring parameters...")
 
-model.Cost_Energy = pyo.Param(model.Nodes, model.Time, model.Technology)  # Cost of using energy source i at time t
+#model.Cost_Energy = pyo.Param(model.Nodes, model.Time, model.Technology)  # Cost of using energy source i at time t
+model.cost_activity = pyo.Param(model.Nodes, model.Time, model.Technology, model.Mode_of_operation) #Cost of using technology i in mode o at time t
 model.Cost_Battery = pyo.Param(model.FlexibleLoad)
-model.Cost_Export = pyo.Param(model.Nodes, model.Time, model.Technology)  # Income from exporting energy to the grid at time t
+#model.Cost_Export = pyo.Param(model.Nodes, model.Time, model.Technology)  # Income from exporting energy to the grid at time t
 model.Cost_Expansion_Tec = pyo.Param(model.Technology) #Capacity expansion cost
 model.Cost_Expansion_Bat = pyo.Param(model.FlexibleLoad) #Capacity expansion cost
 model.Cost_Emission = pyo.Param() #Carbon price
@@ -238,9 +308,10 @@ model.Res_Cap_Down_volume = pyo.Param(model.Nodes, model.Time) #Volume of total 
 #Reading the Parameters, and loading the data
 print("Reading parameters...")
 
-data.load(filename="Par_EnergyCost.tab", param=model.Cost_Energy, format = "table")
+#data.load(filename="Par_EnergyCost.tab", param=model.Cost_Energy, format = "table")
+data.load(filename="Par_ActivityCost.tab", param=model.cost_activity, format = "table")
 data.load(filename="Par_BatteryCost.tab", param=model.Cost_Battery, format = "table")
-data.load(filename="Par_ExportCost.tab", param=model.Cost_Export, format = "table")
+#data.load(filename="Par_ExportCost.tab", param=model.Cost_Export, format = "table")
 data.load(filename="Par_CostExpansion_Tec.tab", param=model.Cost_Expansion_Tec, format = "table")
 data.load(filename="Par_CostExpansion_Bat.tab", param=model.Cost_Expansion_Bat, format = "table")
 if instance == 1 and year == 2025:
@@ -325,8 +396,8 @@ model.y_activity = pyo.Var(model.Nodes, model.Time, model.Technology, model.Mode
 model.q_charge = pyo.Var(model.Nodes, model.Time, model.FlexibleLoad, domain= pyo.NonNegativeReals)
 model.q_discharge = pyo.Var(model.Nodes, model.Time, model.FlexibleLoad, domain= pyo.NonNegativeReals)
 model.q_SoC = pyo.Var(model.Nodes, model.Time, model.FlexibleLoad, domain= pyo.NonNegativeReals)
-model.v_new_tech = pyo.Var(model.Technology, domain = pyo.NonNegativeReals, bounds = (0,0)) 
-model.v_new_bat = pyo.Var(model.FlexibleLoad, domain = pyo.NonNegativeReals, bounds = (0,0))
+model.v_new_tech = pyo.Var(model.Technology, domain = pyo.NonNegativeReals)#, bounds = (0,0)) 
+model.v_new_bat = pyo.Var(model.FlexibleLoad, domain = pyo.NonNegativeReals)#, bounds = (0,0))
 model.y_max = pyo.Var(model.Nodes, model.Month, domain = pyo.NonNegativeReals)
 model.d_flex = pyo.Var(model.Nodes, model.Time, model.EnergyCarrier, domain = pyo.NonNegativeReals)
 model.Up_Shift = pyo.Var(model.Nodes, model.Time, model.EnergyCarrier, domain = pyo.NonNegativeReals)
@@ -429,11 +500,11 @@ model.OPEXCost = pyo.Constraint(model.Nodes_in_stage, model.Time, rule=cost_opex
 """
 def cost_opex(model, n, s, t):
     return model.I_OPEX[n, t] == (sum(
-                model.y_activity[n, t, i, o] * (model.Cost_Energy[n, t, i] 
+                model.y_activity[n, t, i, o] * (model.cost_activity[n, t, i, o] 
                 + model.Carbon_Intensity[i, o] * model.Cost_Emission)
                 for (i, e, o) in model.TechnologyToEnergyCarrier 
             ) 
-            - sum(model.Cost_Export[n, t, i] * model.y_activity[n, t, i, o] for (i, e, o) in model.EnergyCarrierToTechnology)
+            - sum(model.cost_activity[n, t, i, o] * model.y_activity[n, t, i, o] for (i, e, o) in model.EnergyCarrierToTechnology)
             + sum(model.Cost_Battery[b] * model.q_discharge[n, t, b] for b in model.FlexibleLoad)
             + sum(model.Cost_LS[e]*model.Dwn_Shift[n, t, e] for e in model.EnergyCarrier)
     )
@@ -738,7 +809,7 @@ model.ExportLimitation = pyo.Constraint(model.Nodes_in_stage, model.Time, model.
 """
 def peak_load(model, n, s, t, m, i, e, o):
     if i == 'Power_Grid' and e == 'Electricity' and (m,s) in model.PeriodInMonth:
-        return (model.y_out[n, t, i, e, o] <= model.y_max[n, m])
+        return sum(model.y_out[n, t, i, e, o] for o in model.Mode_of_operation if (i,e,o) in model.TechnologyToEnergyCarrier) <= model.y_max[n, m]
     else:
         return pyo.Constraint.Skip
 model.PeakLoad = pyo.Constraint(model.Nodes_in_stage, model.Time, model.Month, model.TechnologyToEnergyCarrier, rule=peak_load)
@@ -806,7 +877,7 @@ print("Building instance...")
 
 our_model = model.create_instance(data)   
 our_model.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT) #Import dual values into solver results
-#import pdb; pdb.set_trace()
+import pdb; pdb.set_trace()
 
 """
 SOLVING PROBLEM
